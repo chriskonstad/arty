@@ -1,3 +1,6 @@
+use regex::Regex;
+use std::str::FromStr;
+
 #[derive(Debug, Clone, Copy)]
 struct Distance(f64);
 
@@ -24,7 +27,9 @@ struct Degrees(f64);
  * mapping for coordinates.
  */
 
-#[derive(Debug)]
+const GRID_IN_METERS: i32 = 100;
+
+#[derive(Debug, PartialEq)]
 struct Pos {
     pub x: f64,
     pub y: f64,
@@ -167,6 +172,177 @@ mod test {
         tester(180.0, 90.0 + 21.0);
         tester(315.0, 21.0 - 45.0);
         tester(225.0, 45.0 + 21.0);
+    }
+
+    #[test]
+    fn test_keypad_to_coord() {
+        let scale = GRID_IN_METERS;
+        let mini_unit = scale / 6;
+        let coord = KeypadCoord {
+            grid_right: b'c',
+            grid_down: 2,
+            keypad: Keypad::ONE,
+        };
+
+        assert_eq!(
+            Pos {
+                x: (scale * 2 + mini_unit) as f64,
+                y: (scale * 1 + mini_unit) as f64,
+            },
+            coord.into()
+        );
+
+        let coord2 = KeypadCoord {
+            grid_right: b'c',
+            grid_down: 2,
+            keypad: Keypad::SIX,
+        };
+        assert_eq!(
+            Pos {
+                x: (scale * 2 + 5 * mini_unit) as f64,
+                y: (scale * 1 + 3 * mini_unit) as f64,
+            },
+            coord2.into()
+        );
+    }
+
+    #[test]
+    fn test_parse_keypad() {
+        assert_eq!(
+            KeypadCoord {
+                grid_right: b'c',
+                grid_down: 2,
+                keypad: Keypad::ONE,
+            },
+            KeypadCoord::from_str("c2k1").unwrap()
+        );
+
+        assert_eq!(
+            KeypadCoord {
+                grid_right: b'd',
+                grid_down: 10,
+                keypad: Keypad::FIVE,
+            },
+            KeypadCoord::from_str("D10K5").unwrap()
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_parse_keypad_keypad_10() {
+        KeypadCoord::from_str("c2k10").unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_parse_keypad_keypad_0() {
+        KeypadCoord::from_str("c2k0").unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_parse_keypad_bad_keypad_grid_letter() {
+        KeypadCoord::from_str("$2k1").unwrap();
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum Keypad {
+    ONE,
+    TWO,
+    THREE,
+    FOUR,
+    FIVE,
+    SIX,
+    SEVEN,
+    EIGHT,
+    NINE,
+}
+
+impl std::str::FromStr for Keypad {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            "1" => Ok(Keypad::ONE),
+            "2" => Ok(Keypad::TWO),
+            "3" => Ok(Keypad::THREE),
+            "4" => Ok(Keypad::FOUR),
+            "5" => Ok(Keypad::FIVE),
+            "6" => Ok(Keypad::SIX),
+            "7" => Ok(Keypad::SEVEN),
+            "8" => Ok(Keypad::EIGHT),
+            "9" => Ok(Keypad::NINE),
+            _ => Err(anyhow::anyhow!("Keypad not in range 1-9!")),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct KeypadCoord {
+    pub grid_right: u8,
+    pub grid_down: i32,
+    pub keypad: Keypad,
+}
+
+impl From<KeypadCoord> for Pos {
+    fn from(coord: KeypadCoord) -> Self {
+        // Convert it to the middle of the keypad
+        let chunk = GRID_IN_METERS / 6;
+        let x_mult = match coord.keypad {
+            Keypad::ONE | Keypad::FOUR | Keypad::SEVEN => 0,
+            Keypad::TWO | Keypad::FIVE | Keypad::EIGHT => 2,
+            Keypad::THREE | Keypad::SIX | Keypad::NINE => 4,
+        };
+        let x = ((coord.grid_right - b'a') as i32) * GRID_IN_METERS + (x_mult * chunk) + chunk;
+        let y_mult = match coord.keypad {
+            Keypad::ONE | Keypad::TWO | Keypad::THREE => 0,
+            Keypad::FOUR | Keypad::FIVE | Keypad::SIX => 2,
+            Keypad::SEVEN | Keypad::EIGHT | Keypad::NINE => 4,
+        };
+        let y = (coord.grid_down - 1) * GRID_IN_METERS + (y_mult * chunk) + chunk;
+
+        Pos {
+            x: x as f64,
+            y: y as f64,
+        }
+    }
+}
+
+impl FromStr for KeypadCoord {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut cleaned = s.trim().to_string();
+        cleaned.make_ascii_lowercase();
+        let re = Regex::new(r"^([a-z])(\d+)k([1-9])$").unwrap();
+        let cap = re
+            .captures(&cleaned)
+            .ok_or(anyhow::anyhow!("Unable to parse as KeypadCoord"))?;
+
+        let right = cap
+            .get(1)
+            .ok_or(anyhow::anyhow!("Missing grid letter"))?
+            .as_str()
+            .as_bytes()
+            .first()
+            .unwrap();
+        let down = cap
+            .get(2)
+            .ok_or(anyhow::anyhow!("Missing grid number"))?
+            .as_str()
+            .parse::<i32>()?;
+        let keypad = cap
+            .get(3)
+            .ok_or(anyhow::anyhow!("Missing keypad"))?
+            .as_str()
+            .parse::<Keypad>()?;
+
+        Ok(KeypadCoord {
+            grid_right: *right,
+            grid_down: down,
+            keypad: keypad,
+        })
     }
 }
 
