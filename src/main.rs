@@ -220,10 +220,10 @@ mod test {
         assert_eq!(
             KeypadCoord {
                 grid_right: b'd',
-                grid_down: 10,
+                grid_down: 7,
                 keypad: Keypad::FIVE,
             },
-            KeypadCoord::from_str("D10K5").unwrap()
+            KeypadCoord::from_str("D7K5").unwrap()
         );
     }
 
@@ -243,6 +243,54 @@ mod test {
     #[should_panic]
     fn test_parse_keypad_bad_keypad_grid_letter() {
         KeypadCoord::from_str("$2k1").unwrap();
+    }
+
+    #[test]
+    fn test_parse_mgrs() {
+        assert_eq!(
+            MgrsCoord {
+                grid_right: b'e',
+                grid_down: 4,
+                easting: 51,
+                northing: 78,
+            },
+            MgrsCoord::from_str("E45178").unwrap()
+        );
+
+        assert_eq!(
+            MgrsCoord {
+                grid_right: b'f',
+                grid_down: 8,
+                easting: 102,
+                northing: 071,
+            },
+            MgrsCoord::from_str("f8102071").unwrap()
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_parse_mgrs_unequal_coords() {
+        MgrsCoord::from_str("f810207").unwrap();
+    }
+
+    #[test]
+    fn test_mgrs_to_coord() {
+        let scale = GRID_IN_METERS;
+        let coord = MgrsCoord {
+            grid_right: b'c',
+            grid_down: 2,
+            easting: 51,
+            northing: 78,
+        };
+
+        assert_eq!(
+            Pos {
+                x: (scale * 2 + coord.easting) as f64,
+                y: (scale * 2 - coord.northing) as f64,
+            },
+            coord.into()
+        );
     }
 }
 
@@ -315,7 +363,7 @@ impl FromStr for KeypadCoord {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut cleaned = s.trim().to_string();
         cleaned.make_ascii_lowercase();
-        let re = Regex::new(r"^([a-z])(\d+)k([1-9])$").unwrap();
+        let re = Regex::new(r"^([a-z])(\d)k([1-9])$").unwrap();
         let cap = re
             .captures(&cleaned)
             .ok_or(anyhow::anyhow!("Unable to parse as KeypadCoord"))?;
@@ -342,6 +390,77 @@ impl FromStr for KeypadCoord {
             grid_right: *right,
             grid_down: down,
             keypad: keypad,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct MgrsCoord {
+    pub grid_right: u8,
+    pub grid_down: i32,
+    pub easting: i32,
+    pub northing: i32,
+}
+
+impl From<MgrsCoord> for Pos {
+    fn from(coord: MgrsCoord) -> Self {
+        let x = ((coord.grid_right - b'a') as i32) * GRID_IN_METERS + coord.easting;
+        // North is in the -y direction, so add one GRID length and subtract northing
+        let y = (coord.grid_down) * GRID_IN_METERS - coord.northing;
+        Pos {
+            x: x as f64,
+            y: y as f64,
+        }
+    }
+}
+
+impl FromStr for MgrsCoord {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut cleaned = s.trim().to_string();
+        cleaned.make_ascii_lowercase();
+        let re = Regex::new(r"^(([a-z])(\d)(\d{2})(\d{2}))$|^(([a-z])(\d)(\d{3})(\d{3}))$").unwrap();
+        let cap = re
+            .captures(&cleaned)
+            .ok_or(anyhow::anyhow!("Unable to parse as MgrsCoord"))?;
+
+        dbg!(&cap);
+
+        let offset = if cap.get(1).is_some() {
+            1
+        } else {
+            6
+        };
+
+        let right = cap
+            .get(1 + offset)
+            .ok_or(anyhow::anyhow!("Missing grid letter"))?
+            .as_str()
+            .as_bytes()
+            .first()
+            .unwrap();
+        let down = cap
+            .get(2 + offset)
+            .ok_or(anyhow::anyhow!("Missing grid number"))?
+            .as_str()
+            .parse::<i32>()?;
+        let easting = cap
+            .get(3 + offset)
+            .ok_or(anyhow::anyhow!("Missing easting"))?
+            .as_str()
+            .parse::<i32>()?;
+        let northing = cap
+            .get(4 + offset)
+            .ok_or(anyhow::anyhow!("Missing northing"))?
+            .as_str()
+            .parse::<i32>()?;
+
+        Ok(MgrsCoord {
+            grid_right: *right,
+            grid_down: down,
+            easting: easting,
+            northing: northing,
         })
     }
 }
