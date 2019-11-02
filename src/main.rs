@@ -1,6 +1,5 @@
 use regex::Regex;
 use std::str::FromStr;
-use std::io::{self, BufRead};
 use structopt::StructOpt;
 
 #[derive(Debug, Clone, Copy)]
@@ -15,7 +14,8 @@ struct Degrees(f64);
 /**
  * TODO
  * UX
- * Parsing
+ * Print help message at startup
+ * WebASM
  */
 
 /*
@@ -498,6 +498,21 @@ struct Opt {
     /// The zero-traverse integer heading of the gun, [0, 359]
     #[structopt(parse(try_from_str = parse_heading))]
     gun_zero: Degrees,
+
+    /// The displayed traverse value at the gun's zero.
+    /// This is to make it easier to zero the gun.
+    /// If the gun's zero is 5 degrees, you can pretend its zero is 0 degrees
+    /// if you traverse -5 degrees first.
+    #[structopt(long, short, default_value="0")]
+    traverse_at_zero: i32,
+
+    /// Disable saving of inter-session histories
+    #[structopt(long)]
+    disable_history: bool,
+
+    /// The file to use for inter-session histories
+    #[structopt(long, default_value=".arty.history")]
+    history_file: String,
 }
 
 fn main() {
@@ -508,21 +523,41 @@ fn main() {
         heading_at_zero: opt.gun_zero,
     };
 
-    let stdin = io::stdin();
-    for line in stdin.lock().lines() {
-        let line = line.unwrap();
-        let coord = parse_coords(&line);
-        match coord {
-            Ok(pos) => {
-                let t = Target { pos };
-                let (mils, traverse) = g.calc(&t);
-                println!("Elevation: {:?}", mils);
-                println!("Traverse: {:?}", traverse);
+    let mut rl = rustyline::Editor::<()>::new();
+    if !opt.disable_history {
+        // Silently ignore missing history files, because that doesn't matter
+        let _ = rl.load_history(&opt.history_file);
+    }
+
+    loop {
+        let readline = rl.readline(">> ");
+        match readline {
+            Ok(line) => {
+                let coord = parse_coords(&line);
+                match coord {
+                    Ok(pos) => {
+                        let t = Target { pos };
+                        let (mils, traverse) = g.calc(&t);
+                        println!("Elevation: {:?}", mils);
+                        println!("Traverse: {:?}", Degrees(traverse.0 + opt.traverse_at_zero as f64));
+                        rl.add_history_entry(line.as_str());
+                    },
+                    Err(msg) => {
+                        println!("INVALID COORDINATE: {}", msg);
+                    }
+                }
+                println!("");
             },
-            Err(msg) => {
-                println!("INVALID COORDINATE: {}", msg);
+            Err(rustyline::error::ReadlineError::Eof) => {
+                break
+            },
+            Err(err) => {
+                println!("Error: {:?}", err);
             }
         }
-        println!("");
+
+        if !opt.disable_history {
+            let _ = rl.save_history(&opt.history_file).unwrap();
+        }
     }
 }
