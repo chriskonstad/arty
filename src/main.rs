@@ -1,5 +1,7 @@
 use regex::Regex;
 use std::str::FromStr;
+use std::io::{self, BufRead};
+use structopt::StructOpt;
 
 #[derive(Debug, Clone, Copy)]
 struct Distance(f64);
@@ -425,8 +427,6 @@ impl FromStr for MgrsCoord {
             .captures(&cleaned)
             .ok_or(anyhow::anyhow!("Unable to parse as MgrsCoord"))?;
 
-        dbg!(&cap);
-
         let offset = if cap.get(1).is_some() {
             1
         } else {
@@ -465,16 +465,64 @@ impl FromStr for MgrsCoord {
     }
 }
 
-fn main() {
-    let g = Gun {
-        pos: Pos { x: 0.0, y: 0.0 },
-        heading_at_zero: Degrees(180.0),
-    };
-    let t = Target {
-        pos: Pos { x: 572.0, y: 0.0 },
-    };
-    let (mils, traverse) = g.calc(&t);
+fn parse_coords(s: &str) -> anyhow::Result<Pos> {
+    let keypad = KeypadCoord::from_str(s);
+    let mgrs = MgrsCoord::from_str(s);
 
-    println!("Elevation: {:?}", mils);
-    println!("Traverse: {:?}", traverse);
+    if keypad.is_ok() {
+        return Ok(keypad.unwrap().into());
+    }
+
+    if mgrs.is_ok() {
+        return Ok(mgrs.unwrap().into());
+    }
+
+    Err(anyhow::anyhow!(format!("Not a coordinate: failed Keypad: {}, failed MGRS: {}", keypad.err().unwrap(), mgrs.err().unwrap())))
+}
+
+fn parse_heading(s: &str) -> anyhow::Result<Degrees> {
+    let val = s.parse::<i32>()?;
+    if val < 0 || 359 < val {
+        return Err(anyhow::anyhow!("{} is not a vaild heading, must be [0, 359]", val));
+    }
+
+    Ok(Degrees(val as f64))
+}
+
+#[derive(Debug, StructOpt)]
+struct Opt {
+    /// Position as a Keypad coordinate (e4k3) or MGRS coordinate (e45178)
+    #[structopt(parse(try_from_str = parse_coords))]
+    gun_pos: Pos,
+
+    /// The zero-traverse integer heading of the gun, [0, 359]
+    #[structopt(parse(try_from_str = parse_heading))]
+    gun_zero: Degrees,
+}
+
+fn main() {
+    let opt = Opt::from_args();
+
+    let g = Gun {
+        pos: opt.gun_pos,
+        heading_at_zero: opt.gun_zero,
+    };
+
+    let stdin = io::stdin();
+    for line in stdin.lock().lines() {
+        let line = line.unwrap();
+        let coord = parse_coords(&line);
+        match coord {
+            Ok(pos) => {
+                let t = Target { pos };
+                let (mils, traverse) = g.calc(&t);
+                println!("Elevation: {:?}", mils);
+                println!("Traverse: {:?}", traverse);
+            },
+            Err(msg) => {
+                println!("INVALID COORDINATE: {}", msg);
+            }
+        }
+        println!("");
+    }
 }
