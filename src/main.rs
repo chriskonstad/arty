@@ -29,7 +29,7 @@ struct Degrees(f64);
  * mapping for coordinates.
  */
 
-const GRID_IN_METERS: i32 = 100;
+const GRID_IN_METERS: i32 = 200;
 
 #[derive(Debug, PartialEq)]
 struct Pos {
