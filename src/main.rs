@@ -1,17 +1,17 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Distance(f64);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Mils(f64);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Degrees(f64);
 
 /**
  * TODO
  * UX
  * Parsing
- * Something about bounds to 180 degrees for the angle
+ * Fix some of the math, depending on vert/hoiz and left/right/up/down and zeroing
  */
 
 /*
@@ -36,11 +36,42 @@ impl Pos {
         Distance(((self.x - other.x).abs().powi(2) + (self.y - other.y).abs().powi(2)).sqrt())
     }
 
-    pub fn angle(&self, other: &Pos) -> Degrees {
+    pub fn angle(&self, other: &Pos, zero: Degrees) -> Degrees {
         let adjacent = (self.x - other.x).abs();
         let opposite = (self.y - other.y).abs();
 
-        let mut val = (((adjacent / opposite).atan()) * 180.0 / std::f64::consts::PI).abs();
+        let theta_rad = (zero.0 - 90.0) * std::f64::consts::PI / 180.0;
+
+        // Translate
+        let mut x_z = other.x - self.x;
+        let mut y_z = other.y - self.y;
+
+        //let t_x = -y_z;
+        //let t_y = x_z;
+
+        //x_z = t_x;
+        //y_z = t_y;
+
+        // Rotate
+        //let x_r = x_z * (cos) + y_z * (sin);
+        let x_r = x_z * theta_rad.cos() + y_z * theta_rad.sin();
+        //let y_r = -x_z * (sin) + y_z * (cos);
+        let y_r = -x_z * theta_rad.sin() + y_z * theta_rad.cos();
+
+        dbg!((x_r, y_r));
+
+        //let val = (((adjacent / opposite).atan2()) * 180.0 / std::f64::consts::PI).abs();
+        //let mut val = ((other.y - self.y).atan2(other.x - self.x) * 180.0 / std::f64::consts::PI);
+        let mut val = (y_r.atan2(x_r) * 180.0 / std::f64::consts::PI);
+        //let slope = (other.y - self.y) / (other.x - self.x);
+        //dbg!(&slope);
+        //if slope < 0.0 {
+        //    val = val;
+        //} else {
+        //    val = val;
+        //}
+        //val += 90.0;
+        //val *= -1.0;
 
         // TODO This is wrong but we'll get there :)
         /*
@@ -86,6 +117,34 @@ fn dist_to_mils(distance: Distance) -> Mils {
     Mils(-0.2371 * distance.0 + 1001.5)
 }
 
+fn calc(gun: Gun, target: Target) -> (Mils, Degrees) {
+    let trav;
+    //let angle;
+    let angle = gun.pos.angle(&target.pos, gun.heading_at_zero);
+    /*
+    if gun.pos.y > target.pos.y {
+        // Shooting north
+        angle = gun.pos.angle(&target.pos);
+    } else {
+        // Shooting south
+        angle = Degrees(gun.pos.angle(&target.pos).0 * -1.0);
+    }
+    */
+    dbg!(&angle);
+    //if 180.0 < gun.heading_at_zero.0 {
+        //trav = 180.0 - gun.heading_at_zero.0 + angle.0;
+        //trav = 90.0 + gun.heading_at_zero.0 - angle.0;
+        //trav = gun.heading_at_zero.0 + angle.0;
+        trav = angle.0;
+    //} else {
+        //trav = 180.0 + angle.0 - gun.heading_at_zero.0;
+        //trav = 420.0;
+    //}
+    //trav = (180.0 - gun.heading_at_zero.0 + angle.0) % 360.0;
+
+    (dist_to_mils(gun.pos.dist(&target.pos)), Degrees(trav))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -108,32 +167,93 @@ mod test {
     fn test_dist_to_mils_conversion() {
         assert_eq!(866.0, dist_to_mils(Distance(572.0)).0.round());
     }
+
+    #[test]
+    fn test_traverse_north_east() {
+        let tester = |zero, expected| {
+            let g = Gun {
+                pos: Pos {
+                    x: 5.0,
+                    y: 10.0,
+                },
+                heading_at_zero: Degrees(zero),
+            };
+            let t = Target {
+                pos: Pos {
+                    x: 8.0,
+                    y: 2.0,
+                },
+            };
+            let (_, trav) = calc(g, t);
+            assert_eq!(expected, trav.0.round());
+        };
+        tester(0.0, 21.0);
+        tester(270.0, 90.0 + 21.0);
+        tester(90.0, 21.0 - 90.0);
+        tester(300.0, 60.0 + 21.0);
+        tester(45.0, 21.0 - 45.0);
+    }
+
+    #[test]
+    fn test_traverse_south_east() {
+        let tester = |zero, expected| {
+            let g = Gun {
+                pos: Pos {
+                    x: 5.0,
+                    y: 0.0,
+                },
+                heading_at_zero: Degrees(zero),
+            };
+            let t = Target {
+                pos: Pos {
+                    x: 8.0,
+                    y: 8.0,
+                },
+            };
+            let (_, trav) = calc(g, t);
+            assert_eq!(expected, trav.0.round());
+        };
+        tester(180.0, -21.0);
+        tester(270.0, -21.0 - 90.0);
+        tester(90.0, -21.0 + 90.0);
+        tester(240.0, -21.0 - 60.0);
+        tester(135.0, -21.0 + 45.0);
+    }
 }
 
 fn main() {
     let g = Gun {
         pos: Pos {
             x: 5.0,
-            y: 10.0,
+            y: 0.0,
         },
-        heading_at_zero: Degrees(45.0),
+        heading_at_zero: Degrees(180.0),
     };
     let t = Target {
         pos: Pos {
             x: 8.0,
-            y: 2.0,
+            y: 8.0,
         },
     };
     println!("Distance, {:?}", g.pos.dist(&t.pos));
     println!("");
     println!("Mills, {:?}", dist_to_mils(g.pos.dist(&t.pos)));
-    println!("Angle: {:?}", g.pos.angle(&t.pos));
-    println!("Traverse, {:?}", g.heading_at_zero.0 + g.pos.angle(&t.pos).0);
+    //println!("Angle: {:?}", g.pos.angle(&t.pos));
+    let angle;
+    if g.pos.y > t.pos.y {
+        // Shooting north
+        angle = g.pos.angle(&t.pos, g.heading_at_zero);
+    } else {
+        // Shooting south
+        angle = Degrees(g.pos.angle(&t.pos, g.heading_at_zero).0 * -1.0);
+    }
+    println!("Angle: {:?}", angle);
+    println!("Traverse, {:?}", g.heading_at_zero.0 + angle.0);
     let trav;
     if 180.0 < g.heading_at_zero.0 {
-        trav = 360.0 - g.heading_at_zero.0 + g.pos.angle(&t.pos).0;
+        trav = 360.0 - g.heading_at_zero.0 + angle.0;
     } else {
-        trav = g.pos.angle(&t.pos).0 - g.heading_at_zero.0;
+        trav = 180.0 + angle.0 - g.heading_at_zero.0;
     }
     println!("Traverse (corrected), {:?}", trav);
 }
