@@ -11,9 +11,18 @@ struct Degrees(f64);
  * TODO
  * UX
  * Parsing
- * Traverse pos or neg? - ===== +
- * Zeroing based on location of gun
  * Something about bounds to 180 degrees for the angle
+ */
+
+/*
+ * NOTES:
+ * Traverse goes: - ==== + (negative to the left, positive to the right)
+ * This assumes the standard
+ *   A B C
+ * 1             N
+ * 2           W   E
+ * 3             S
+ * mapping for coordinates.
  */
 
 #[derive(Debug)]
@@ -60,12 +69,6 @@ impl Pos {
         Degrees(val)
         //Degrees(val.abs() * multiplier)
     }
-}
-
-#[derive(Debug)]
-struct PolarPos {
-    pub r: f64,
-    pub alpha: Degrees,
 }
 
 #[derive(Debug)]
